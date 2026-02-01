@@ -1,0 +1,10 @@
+- name: UFW extra en DB (MariaDB)
+  hosts: db
+  become: true
+  tasks:
+    - name: Permitir 3306 solo desde master
+      ufw:
+        rule: allow
+        port: "3306"
+        proto: tcp
+        src: 192.168.56.101

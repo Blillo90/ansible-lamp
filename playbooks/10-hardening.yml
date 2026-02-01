@@ -1,0 +1,58 @@
+- name: Hardening base (SSH + UFW + Fail2Ban)
+  hosts: all
+  become: true
+  tasks:
+    - name: Instalar paquetes base
+      apt:
+        name:
+          - ufw
+          - fail2ban
+        update_cache: true
+
+    - name: Config SSH - deshabilitar root login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+
+    - name: Reiniciar SSH
+      service:
+        name: ssh
+        state: restarted
+
+    - name: UFW - denegar entrante por defecto
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: UFW - permitir saliente por defecto
+      ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: UFW - permitir SSH desde LAN
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+        src: 192.168.56.0/24
+
+    - name: Activar UFW
+      ufw:
+        state: enabled
+        logging: 'on'
+
+    - name: Fail2Ban - jail local
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          maxretry = 5
+          findtime = 10m
+          bantime = 1h
+
+    - name: Reiniciar Fail2Ban
+      service:
+        name: fail2ban
+        state: restarted
