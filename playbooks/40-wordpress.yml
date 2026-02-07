@@ -1,6 +1,11 @@
 - name: Paso 9 - WordPress en Kubernetes con balanceo (replicas + Ingress)
   hosts: master
   become: true
+
+  # Cargamos variables de forma explícita para evitar problemas de carga de group_vars
+  vars_files:
+    - ../group_vars/all/vars.yml
+
   vars:
     kubeconfig_path: /home/david/.kube/config
 
@@ -22,7 +27,20 @@
           wp_namespace, wp_db_name, wp_db_user, wp_db_pass, wp_db_host,
           wp_replicas, wp_image, wp_ingress_name, wp_host.
 
+    - name: Debug variables (para confirmar que se cargan)
+      debug:
+        msg:
+          - "wp_namespace={{ wp_namespace }}"
+          - "wp_db_name={{ wp_db_name }}"
+          - "wp_db_user={{ wp_db_user }}"
+          - "wp_db_host={{ wp_db_host }}"
+          - "wp_replicas={{ wp_replicas }}"
+          - "wp_image={{ wp_image }}"
+          - "wp_ingress_name={{ wp_ingress_name }}"
+          - "wp_host={{ wp_host }}"
+
   tasks:
+    # 9.1 Namespace
     - name: 9.1 Crear namespace {{ wp_namespace }}
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -34,6 +52,7 @@
           metadata:
             name: "{{ wp_namespace }}"
 
+    # 9.2 Secret DB
     - name: 9.2 Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -51,6 +70,7 @@
             WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
+    # 9.3 Deployment con replicas
     - name: 9.3 Crear/actualizar Deployment WordPress ({{ wp_replicas }} replicas)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -82,6 +102,7 @@
                       - secretRef:
                           name: wp-db-secret
 
+    # Service
     - name: Crear/actualizar Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -99,6 +120,7 @@
               - port: 80
                 targetPort: 80
 
+    # Ingress (Traefik en k3s)
     - name: Crear/actualizar Ingress (punto de entrada unico)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -122,6 +144,7 @@
                           port:
                             number: 80
 
+    # Esperar a que el Deployment esté disponible (más fiable que fases de pods)
     - name: Esperar a que el Deployment wordpress esté Available
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -136,6 +159,7 @@
       retries: 40
       delay: 6
 
+    # Comprobaciones tipo "kubectl get pods -o wide"
     - name: Mostrar pods (equivalente a kubectl -n {{ wp_namespace }} get pods -o wide)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -152,6 +176,7 @@
           | podIP={{ item.status.podIP | default('') }} | phase={{ item.status.phase }}
       loop: "{{ wp_pods_wide.resources }}"
 
+    # Comprobación Ingress
     - name: Mostrar Ingress (equivalente a kubectl -n {{ wp_namespace }} get ingress)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
