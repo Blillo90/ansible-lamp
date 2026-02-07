@@ -2,3 +2,11 @@ wp_db_name: wordpress
 wp_db_user: wp_david
 wp_db_pass: "root"
 wp_db_host: 192.168.56.102
+
+# Nº Replicas e imagen wordpress
+wp_replicas: 3
+wp_image: "wordpress:php8.2-apache"
+
+# Ingress
+wp_ingress_name: wordpress-ingress
+wp_host: "wordpress.local"   
