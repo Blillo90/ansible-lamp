@@ -4,19 +4,39 @@
   vars:
     kubeconfig_path: /home/david/.kube/config
 
+  pre_tasks:
+    - name: Validar variables obligatorias (si falta alguna, para con error claro)
+      assert:
+        that:
+          - wp_namespace is defined
+          - wp_db_name is defined
+          - wp_db_user is defined
+          - wp_db_password is defined
+          - wp_db_host is defined
+          - wp_replicas is defined
+          - wp_image is defined
+          - wp_ingress_name is defined
+          - wp_host is defined
+        fail_msg: >
+          Faltan variables de WordPress. Revisa group_vars (por ejemplo: group_vars/all/vars.yml)
+          y define: wp_namespace, wp_db_name, wp_db_user, wp_db_password, wp_db_host,
+          wp_replicas, wp_image, wp_ingress_name, wp_host.
+
   tasks:
     # 9.1 Namespace
-    - name: Crear namespace wordpress
+    - name: 9.1 Crear namespace {{ wp_namespace }}
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
+        wait: true
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
             name: "{{ wp_namespace }}"
+
     # 9.2 Secret DB
-    - name: Crear/actualizar Secret con credenciales DB
+    - name: 9.2 Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -34,10 +54,12 @@
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
     # 9.3 Deployment con replicas
-    - name: Crear/actualizar Deployment WordPress (replicas)
+    - name: 9.3 Crear/actualizar Deployment WordPress ({{ wp_replicas }} replicas)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
+        wait: true
+        wait_timeout: 300
         definition:
           apiVersion: apps/v1
           kind: Deployment
@@ -45,7 +67,7 @@
             name: wordpress
             namespace: "{{ wp_namespace }}"
           spec:
-            replicas: "{{ wp_replicas }}"
+            replicas: "{{ wp_replicas | int }}"
             selector:
               matchLabels:
                 app: wordpress
@@ -105,27 +127,29 @@
                           port:
                             number: 80
 
-    # Espera a pods Running
-    - name: Esperar a que los pods de WordPress estén Running
+    # Esperar a que el Deployment esté disponible (mejor que mirar fases de pods)
+    - name: Esperar a que el Deployment wordpress esté Available
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: apps/v1
+        kind: Deployment
+        name: wordpress
+        namespace: "{{ wp_namespace }}"
+      register: wp_deploy_info
+      until: >
+        (wp_deploy_info.resources | length) > 0 and
+        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int) >= (wp_replicas | int)
+      retries: 40
+      delay: 6
+
+    # Comprobaciones tipo "kubectl get pods -o wide"
+    - name: Mostrar pods (equivalente a kubectl -n {{ wp_namespace }} get pods -o wide)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         kind: Pod
         namespace: "{{ wp_namespace }}"
         label_selectors:
           - "app=wordpress"
-      register: wp_pods
-      until: >
-        (wp_pods.resources | length) >= (wp_replicas | int) and
-        ((wp_pods.resources | map(attribute='status.phase') | list) | unique) == ['Running']
-      retries: 40
-      delay: 6
-
-    # Comprobaciones tipo "kubectl get pods -o wide"
-    - name: Mostrar pods (equivalente a kubectl -n wordpress get pods -o wide)
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        kind: Pod
-        namespace: "{{ wp_namespace }}"
       register: wp_pods_wide
 
     - name: Pods (nombre / nodo / IP / estado)
@@ -133,14 +157,15 @@
         msg: >-
           {{ item.metadata.name }} | node={{ item.spec.nodeName | default('') }}
           | podIP={{ item.status.podIP | default('') }} | phase={{ item.status.phase }}
-      loop: "{{ wp_pods_wide.resources | selectattr('metadata.labels.app','defined') | selectattr('metadata.labels.app','equalto','wordpress') | list }}"
+      loop: "{{ wp_pods_wide.resources }}"
 
     # Comprobación Ingress
-    - name: Mostrar Ingress (equivalente a kubectl -n wordpress get ingress)
+    - name: Mostrar Ingress (equivalente a kubectl -n {{ wp_namespace }} get ingress)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         kind: Ingress
         namespace: "{{ wp_namespace }}"
+        name: "{{ wp_ingress_name }}"
       register: wp_ing
 
     - name: Ingress creado
