@@ -27,6 +27,10 @@
           wp_namespace, wp_db_name, wp_db_user, wp_db_pass, wp_db_host,
           wp_replicas, wp_image, wp_ingress_name, wp_host.
 
+    - name: Convertir wp_replicas a int real (evita string en Kubernetes)
+      set_fact:
+        wp_replicas_int: "{{ wp_replicas | int }}"
+
     - name: Debug variables (para confirmar que se cargan)
       debug:
         msg:
@@ -34,7 +38,7 @@
           - "wp_db_name={{ wp_db_name }}"
           - "wp_db_user={{ wp_db_user }}"
           - "wp_db_host={{ wp_db_host }}"
-          - "wp_replicas={{ wp_replicas }}"
+          - "wp_replicas={{ wp_replicas }} (int={{ wp_replicas_int }})"
           - "wp_image={{ wp_image }}"
           - "wp_ingress_name={{ wp_ingress_name }}"
           - "wp_host={{ wp_host }}"
@@ -71,7 +75,7 @@
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
     # 9.3 Deployment con replicas
-    - name: 9.3 Crear/actualizar Deployment WordPress ({{ wp_replicas }} replicas)
+    - name: 9.3 Crear/actualizar Deployment WordPress ({{ wp_replicas_int }} replicas)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -84,7 +88,7 @@
             name: wordpress
             namespace: "{{ wp_namespace }}"
           spec:
-            replicas: {{ wp_replicas | int }}
+            replicas: "{{ wp_replicas_int }}"
             selector:
               matchLabels:
                 app: wordpress
@@ -144,7 +148,7 @@
                           port:
                             number: 80
 
-    # Esperar a que el Deployment esté disponible (más fiable que fases de pods)
+    # Esperar a que el Deployment esté disponible
     - name: Esperar a que el Deployment wordpress esté Available
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -155,11 +159,11 @@
       register: wp_deploy_info
       until: >
         (wp_deploy_info.resources | length) > 0 and
-        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int) >= (wp_replicas | int)
+        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int) >= (wp_replicas_int | int)
       retries: 40
       delay: 6
 
-    # Comprobaciones tipo "kubectl get pods -o wide"
+    # Pods -o wide
     - name: Mostrar pods (equivalente a kubectl -n {{ wp_namespace }} get pods -o wide)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -176,7 +180,7 @@
           | podIP={{ item.status.podIP | default('') }} | phase={{ item.status.phase }}
       loop: "{{ wp_pods_wide.resources }}"
 
-    # Comprobación Ingress
+    # Ingress
     - name: Mostrar Ingress (equivalente a kubectl -n {{ wp_namespace }} get ingress)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
