@@ -9,24 +9,11 @@
     kubeconfig_path: /home/david/.kube/config
 
   pre_tasks:
-    - name: Validar variables obligatorias
-      assert:
-        that:
-          - wp_namespace is defined
-          - wp_db_name is defined
-          - wp_db_user is defined
-          - wp_db_pass is defined
-          - wp_db_host is defined
-          - wp_replicas is defined
-          - wp_image is defined
-          - wp_ingress_name is defined
-          - wp_host is defined
-
     - name: Convertir wp_replicas a int real
       set_fact:
         wp_replicas_int: "{{ wp_replicas | int }}"
 
-    - name: Construir manifiesto Deployment como dict (replicas int real)
+    - name: Construir manifiesto Deployment WordPress
       set_fact:
         wp_deployment_manifest:
           apiVersion: apps/v1
@@ -53,18 +40,19 @@
                       - secretRef:
                           name: wp-db-secret
 
-    # clave: forzamos a que replicas sea int en el dict (no string)
-    - name: Asegurar que replicas es int (no string) dentro del dict
+    # Fuerza replicas como entero (evita error Kubernetes)
+    - name: Asegurar replicas como entero
       set_fact:
         wp_deployment_manifest: >-
           {{
             wp_deployment_manifest | combine(
-              {'spec': (wp_deployment_manifest.spec | combine({'replicas': (wp_replicas_int | int)}))}
+              {'spec': (wp_deployment_manifest.spec | combine({'replicas': wp_replicas_int | int}))}
             )
           }}
 
   tasks:
-    - name: 9.1 Crear namespace
+    # 9.1 Namespace
+    - name: Crear namespace WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -75,7 +63,8 @@
           metadata:
             name: "{{ wp_namespace }}"
 
-    - name: 9.2 Crear/actualizar Secret con credenciales DB
+    # 9.2 Secret DB
+    - name: Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -92,7 +81,8 @@
             WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
-    - name: 9.3 Crear/actualizar Deployment WordPress (replicas int real)
+    # 9.3 Deployment WordPress (replicas)
+    - name: Crear/actualizar Deployment WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -100,7 +90,8 @@
         wait_timeout: 300
         definition: "{{ wp_deployment_manifest }}"
 
-    - name: Service wordpress-svc
+    # Service
+    - name: Crear/actualizar Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -117,7 +108,8 @@
               - port: 80
                 targetPort: 80
 
-    - name: Ingress (Traefik en k3s)
+    # Ingress (Traefik en k3s)
+    - name: Crear/actualizar Ingress WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -140,7 +132,8 @@
                           port:
                             number: 80
 
-    - name: Esperar a que el Deployment esté Available
+    # Esperar a que el deployment esté disponible
+    - name: Esperar a que WordPress esté disponible
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         api_version: apps/v1
@@ -149,23 +142,7 @@
         namespace: "{{ wp_namespace }}"
       register: wp_deploy_info
       until: >
-        (wp_deploy_info.resources | length) > 0 and
-        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int) >= (wp_replicas_int | int)
+        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int)
+        >= (wp_replicas_int | int)
       retries: 40
       delay: 6
-
-    - name: Mostrar pods (como kubectl get pods -o wide)
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        kind: Pod
-        namespace: "{{ wp_namespace }}"
-        label_selectors:
-          - "app=wordpress"
-      register: wp_pods_wide
-
-    - name: Pods (nombre / nodo / IP / estado)
-      debug:
-        msg: >-
-          {{ item.metadata.name }} | node={{ item.spec.nodeName | default('') }}
-          | podIP={{ item.status.podIP | default('') }} | phase={{ item.status.phase }}
-      loop: "{{ wp_pods_wide.resources }}"
