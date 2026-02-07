@@ -15,7 +15,6 @@
           kind: Namespace
           metadata:
             name: "{{ wp_namespace }}"
-
     # 9.2 Secret DB
     - name: Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
