@@ -2,7 +2,6 @@
   hosts: master
   become: true
 
-  # Cargamos variables de forma explícita para evitar problemas de carga de group_vars
   vars_files:
     - ../group_vars/all/vars.yml
 
@@ -10,7 +9,7 @@
     kubeconfig_path: /home/david/.kube/config
 
   pre_tasks:
-    - name: Validar variables obligatorias (si falta alguna, para con error claro)
+    - name: Validar variables obligatorias
       assert:
         that:
           - wp_namespace is defined
@@ -22,73 +21,21 @@
           - wp_image is defined
           - wp_ingress_name is defined
           - wp_host is defined
-        fail_msg: >
-          Faltan variables de WordPress. Revisa group_vars/all/vars.yml y define:
-          wp_namespace, wp_db_name, wp_db_user, wp_db_pass, wp_db_host,
-          wp_replicas, wp_image, wp_ingress_name, wp_host.
 
-    - name: Convertir wp_replicas a int real (evita string en Kubernetes)
+    - name: Convertir wp_replicas a int real
       set_fact:
         wp_replicas_int: "{{ wp_replicas | int }}"
 
-    - name: Debug variables (para confirmar que se cargan)
-      debug:
-        msg:
-          - "wp_namespace={{ wp_namespace }}"
-          - "wp_db_name={{ wp_db_name }}"
-          - "wp_db_user={{ wp_db_user }}"
-          - "wp_db_host={{ wp_db_host }}"
-          - "wp_replicas={{ wp_replicas }} (int={{ wp_replicas_int }})"
-          - "wp_image={{ wp_image }}"
-          - "wp_ingress_name={{ wp_ingress_name }}"
-          - "wp_host={{ wp_host }}"
-
-  tasks:
-    # 9.1 Namespace
-    - name: 9.1 Crear namespace {{ wp_namespace }}
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        wait: true
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: "{{ wp_namespace }}"
-
-    # 9.2 Secret DB
-    - name: 9.2 Crear/actualizar Secret con credenciales DB
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: wp-db-secret
-            namespace: "{{ wp_namespace }}"
-          type: Opaque
-          stringData:
-            WORDPRESS_DB_NAME: "{{ wp_db_name }}"
-            WORDPRESS_DB_USER: "{{ wp_db_user }}"
-            WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
-            WORDPRESS_DB_HOST: "{{ wp_db_host }}"
-
-    # 9.3 Deployment con replicas
-    - name: 9.3 Crear/actualizar Deployment WordPress ({{ wp_replicas_int }} replicas)
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        wait: true
-        wait_timeout: 300
-        definition:
+    - name: Construir manifiesto Deployment como dict (replicas int real)
+      set_fact:
+        wp_deployment_manifest:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: wordpress
             namespace: "{{ wp_namespace }}"
           spec:
-            replicas: {{ wp_replicas_int }}
+            replicas: "{{ wp_replicas_int }}"
             selector:
               matchLabels:
                 app: wordpress
@@ -106,8 +53,54 @@
                       - secretRef:
                           name: wp-db-secret
 
-    # Service
-    - name: Crear/actualizar Service wordpress-svc
+    # clave: forzamos a que replicas sea int en el dict (no string)
+    - name: Asegurar que replicas es int (no string) dentro del dict
+      set_fact:
+        wp_deployment_manifest: >-
+          {{
+            wp_deployment_manifest | combine(
+              {'spec': (wp_deployment_manifest.spec | combine({'replicas': (wp_replicas_int | int)}))}
+            )
+          }}
+
+  tasks:
+    - name: 9.1 Crear namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        wait: true
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ wp_namespace }}"
+
+    - name: 9.2 Crear/actualizar Secret con credenciales DB
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: wp-db-secret
+            namespace: "{{ wp_namespace }}"
+          type: Opaque
+          stringData:
+            WORDPRESS_DB_NAME: "{{ wp_db_name }}"
+            WORDPRESS_DB_USER: "{{ wp_db_user }}"
+            WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
+            WORDPRESS_DB_HOST: "{{ wp_db_host }}"
+
+    - name: 9.3 Crear/actualizar Deployment WordPress (replicas int real)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        wait: true
+        wait_timeout: 300
+        definition: "{{ wp_deployment_manifest }}"
+
+    - name: Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -124,8 +117,7 @@
               - port: 80
                 targetPort: 80
 
-    # Ingress (Traefik en k3s)
-    - name: Crear/actualizar Ingress (punto de entrada unico)
+    - name: Ingress (Traefik en k3s)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -148,8 +140,7 @@
                           port:
                             number: 80
 
-    # Esperar a que el Deployment esté disponible
-    - name: Esperar a que el Deployment wordpress esté Available
+    - name: Esperar a que el Deployment esté Available
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         api_version: apps/v1
@@ -163,8 +154,7 @@
       retries: 40
       delay: 6
 
-    # Pods -o wide
-    - name: Mostrar pods (equivalente a kubectl -n {{ wp_namespace }} get pods -o wide)
+    - name: Mostrar pods (como kubectl get pods -o wide)
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         kind: Pod
@@ -179,16 +169,3 @@
           {{ item.metadata.name }} | node={{ item.spec.nodeName | default('') }}
           | podIP={{ item.status.podIP | default('') }} | phase={{ item.status.phase }}
       loop: "{{ wp_pods_wide.resources }}"
-
-    # Ingress
-    - name: Mostrar Ingress (equivalente a kubectl -n {{ wp_namespace }} get ingress)
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        kind: Ingress
-        namespace: "{{ wp_namespace }}"
-        name: "{{ wp_ingress_name }}"
-      register: wp_ing
-
-    - name: Ingress creado
-      debug:
-        msg: "Ingress {{ wp_ingress_name }} host={{ wp_host }} -> service wordpress-svc:80"
