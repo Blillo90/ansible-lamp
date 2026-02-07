@@ -84,7 +84,7 @@
             name: wordpress
             namespace: "{{ wp_namespace }}"
           spec:
-            replicas: "{{ wp_replicas | int }}"
+            replicas: {{ wp_replicas | int }}
             selector:
               matchLabels:
                 app: wordpress
