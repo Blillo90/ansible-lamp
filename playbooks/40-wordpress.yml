@@ -55,6 +55,7 @@
     - name: Crear namespace WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         state: present
         wait: true
         definition:
@@ -67,6 +68,7 @@
     - name: Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         state: present
         definition:
           apiVersion: v1
@@ -85,6 +87,7 @@
     - name: Crear/actualizar Deployment WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         state: present
         wait: true
         wait_timeout: 300
@@ -94,6 +97,7 @@
     - name: Crear/actualizar Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         state: present
         definition:
           apiVersion: v1
@@ -112,6 +116,7 @@
     - name: Crear/actualizar Ingress WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         state: present
         definition:
           apiVersion: networking.k8s.io/v1
@@ -136,12 +141,14 @@
     - name: Esperar a que WordPress esté disponible
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
+        validate_certs: false
         api_version: apps/v1
         kind: Deployment
         name: wordpress
         namespace: "{{ wp_namespace }}"
       register: wp_deploy_info
       until: >
+        (wp_deploy_info.resources | length) > 0 and
         (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int)
         >= (wp_replicas_int | int)
       retries: 40
