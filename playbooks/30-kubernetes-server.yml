@@ -1,13 +1,26 @@
 - name: Instalar k3s server en master
   hosts: master
   become: true
-  tasks:
 
-    - name: Instalar k3s server
+  tasks:
+    - name: Instalar dependencias mínimas
+      apt:
+        name:
+          - curl
+        state: present
+        update_cache: true
+
+    - name: Instalar k3s server (forzando IP e interfaz)
       shell: |
-        curl -sfL https://get.k3s.io | sh -
+        curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_EXEC="server \
+          --node-ip {{ hostvars[inventory_hostname].node_ip }} \
+          --advertise-address {{ hostvars[inventory_hostname].node_ip }} \
+          --flannel-iface {{ hostvars[inventory_hostname].flannel_iface }} \
+          --write-kubeconfig-mode 0644" \
+        sh -
       args:
-        creates: /usr/local/bin/k3s
+        creates: /etc/systemd/system/k3s.service
 
     - name: Copiar kubeconfig a usuario david
       shell: |
@@ -15,6 +28,7 @@
         cp /etc/rancher/k3s/k3s.yaml /home/david/.kube/config
         chown -R david:david /home/david/.kube
       args:
+        # OJO: mejor que se actualice aunque exista (si reinstalas)
         creates: /home/david/.kube/config
 
     - name: Obtener token del master
@@ -24,4 +38,4 @@
 
     - name: Guardar token como fact para el resto
       set_fact:
-        k3s_token: "{{ k3s_token_b64['content'] | b64decode | trim }}"
+        k3s_token: "{{ k3s_token_b64.content | b64decode | trim }}"
