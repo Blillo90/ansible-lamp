@@ -9,21 +9,23 @@
     # En k3s este kubeconfig ES el bueno (evita x509 y problemas de CA)
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
-  pre_tasks:
+    pre_tasks:
     - name: Convertir wp_replicas a int real
       set_fact:
         wp_replicas_int: "{{ wp_replicas | int }}"
 
-    - name: Construir manifiesto Deployment WordPress
+    - name: Construir manifiesto Deployment WordPress (YAML -> dict, replicas INT real)
       set_fact:
-        wp_deployment_manifest:
+        wp_deployment_manifest: "{{ wp_deployment_manifest_yaml | from_yaml }}"
+      vars:
+        wp_deployment_manifest_yaml: |
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: wordpress
-            namespace: "{{ wp_namespace }}"
+            namespace: {{ wp_namespace }}
           spec:
-            replicas: "{{ wp_replicas_int }}"
+            replicas: {{ wp_replicas_int }}
             selector:
               matchLabels:
                 app: wordpress
@@ -34,13 +36,12 @@
               spec:
                 containers:
                   - name: wordpress
-                    image: "{{ wp_image }}"
+                    image: {{ wp_image }}
                     ports:
                       - containerPort: 80
                     envFrom:
                       - secretRef:
                           name: wp-db-secret
-
   tasks:
     - name: Crear namespace WordPress
       kubernetes.core.k8s:
