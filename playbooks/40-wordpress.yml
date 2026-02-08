@@ -6,7 +6,8 @@
     - ../group_vars/all/vars.yml
 
   vars:
-    kubeconfig_path: /home/david/.kube/config
+    # En k3s este kubeconfig ES el bueno (evita x509 y problemas de CA)
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
   pre_tasks:
     - name: Convertir wp_replicas a int real
@@ -40,22 +41,10 @@
                       - secretRef:
                           name: wp-db-secret
 
-    # Fuerza replicas como entero (evita error Kubernetes)
-    - name: Asegurar replicas como entero
-      set_fact:
-        wp_deployment_manifest: >-
-          {{
-            wp_deployment_manifest | combine(
-              {'spec': (wp_deployment_manifest.spec | combine({'replicas': wp_replicas_int | int}))}
-            )
-          }}
-
   tasks:
-    # 9.1 Namespace
     - name: Crear namespace WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         state: present
         wait: true
         definition:
@@ -64,11 +53,9 @@
           metadata:
             name: "{{ wp_namespace }}"
 
-    # 9.2 Secret DB
     - name: Crear/actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         state: present
         definition:
           apiVersion: v1
@@ -83,21 +70,17 @@
             WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
-    # 9.3 Deployment WordPress (replicas)
     - name: Crear/actualizar Deployment WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         state: present
         wait: true
         wait_timeout: 300
         definition: "{{ wp_deployment_manifest }}"
 
-    # Service
     - name: Crear/actualizar Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         state: present
         definition:
           apiVersion: v1
@@ -112,11 +95,9 @@
               - port: 80
                 targetPort: 80
 
-    # Ingress (Traefik en k3s)
     - name: Crear/actualizar Ingress WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         state: present
         definition:
           apiVersion: networking.k8s.io/v1
@@ -137,11 +118,9 @@
                           port:
                             number: 80
 
-    # Esperar a que el deployment esté disponible
     - name: Esperar a que WordPress esté disponible
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
-        validate_certs: false
         api_version: apps/v1
         kind: Deployment
         name: wordpress
