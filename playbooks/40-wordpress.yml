@@ -125,8 +125,7 @@
             namespace: "{{ wp_namespace }}"
           spec:
             rules:
-              - host: "{{ wp_host }}"
-                http:
+              - http:
                   paths:
                     - path: /
                       pathType: Prefix
