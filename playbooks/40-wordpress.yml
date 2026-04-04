@@ -5,40 +5,6 @@
   vars:
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
-  pre_tasks:
-    - name: Fijar una sola réplica
-      set_fact:
-        wp_replicas_int: 1
-
-    - name: Construir manifiesto Deployment WordPress
-      set_fact:
-        wp_deployment_manifest: "{{ wp_deployment_manifest_yaml | from_yaml }}"
-      vars:
-        wp_deployment_manifest_yaml: |
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: wordpress
-            namespace: {{ wp_namespace }}
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: wordpress
-            template:
-              metadata:
-                labels:
-                  app: wordpress
-              spec:
-                containers:
-                  - name: wordpress
-                    image: {{ wp_image }}
-                    ports:
-                      - containerPort: 80
-                    envFrom:
-                      - secretRef:
-                          name: wp-db-secret
-
   tasks:
     - name: Crear namespace WordPress
       kubernetes.core.k8s:
@@ -74,7 +40,30 @@
         state: present
         wait: true
         wait_timeout: 300
-        definition: "{{ wp_deployment_manifest }}"
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: wordpress
+            namespace: "{{ wp_namespace }}"
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: wordpress
+            template:
+              metadata:
+                labels:
+                  app: wordpress
+              spec:
+                containers:
+                  - name: wordpress
+                    image: "{{ wp_image }}"
+                    ports:
+                      - containerPort: 80
+                    envFrom:
+                      - secretRef:
+                          name: wp-db-secret
 
     - name: Crear/actualizar Service wordpress-svc
       kubernetes.core.k8s:
