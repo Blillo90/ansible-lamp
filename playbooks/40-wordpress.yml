@@ -1,4 +1,4 @@
-- name: Paso 9 - WordPress en Kubernetes con balanceo (replicas + Ingress)
+- name: Paso 9 - WordPress en Kubernetes con un solo pod + Ingress
   hosts: master
   become: true
 
@@ -6,17 +6,14 @@
     - ../group_vars/all/vars.yml
 
   vars:
-    # En k3s este kubeconfig ES el bueno (evita x509 y problemas de CA)
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
   pre_tasks:
-    - name: Convertir wp_replicas a int real
+    - name: Fijar una sola réplica
       set_fact:
-        wp_replicas_int: "{{ wp_replicas | int }}"
+        wp_replicas_int: 1
 
-    # ✅ Construimos el manifest como YAML "texto" y lo parseamos a dict:
-    # así replicas queda como entero REAL (3) y no como string ("3")
-    - name: Construir manifiesto Deployment WordPress (replicas INT real)
+    - name: Construir manifiesto Deployment WordPress
       set_fact:
         wp_deployment_manifest: "{{ wp_deployment_manifest_yaml | from_yaml }}"
       vars:
@@ -27,7 +24,7 @@
             name: wordpress
             namespace: {{ wp_namespace }}
           spec:
-            replicas: {{ wp_replicas_int }}
+            replicas: 1
             selector:
               matchLabels:
                 app: wordpress
@@ -132,7 +129,6 @@
       register: wp_deploy_info
       until: >
         (wp_deploy_info.resources | length) > 0 and
-        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int)
-        >= (wp_replicas_int | int)
+        (wp_deploy_info.resources[0].status.availableReplicas | default(0) | int) >= 1
       retries: 40
       delay: 6
