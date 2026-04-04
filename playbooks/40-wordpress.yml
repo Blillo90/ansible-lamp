@@ -16,9 +16,9 @@
         update_cache: true
 
     - name: Instalar librería kubernetes para Python
-      pip:
-        name: kubernetes
-        executable: pip3
+      apt:
+        name: python3-kubernetes
+        state: present
 
     - name: Asegurar directorio .kube para david
       file:
