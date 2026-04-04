@@ -2,9 +2,6 @@
   hosts: master
   become: true
 
-  vars_files:
-    - ../group_vars/all/vars.yml
-
   vars:
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
