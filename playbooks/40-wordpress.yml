@@ -6,6 +6,20 @@
     kubeconfig_path: /home/david/.kube/config
 
   tasks:
+    - name: Instalar dependencias Python para Kubernetes
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-yaml
+        state: present
+        update_cache: true
+
+    - name: Instalar librería kubernetes para Python
+      pip:
+        name: kubernetes
+        executable: pip3
+
     - name: Asegurar directorio .kube para david
       file:
         path: /home/david/.kube
