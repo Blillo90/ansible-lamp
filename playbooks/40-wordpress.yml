@@ -3,21 +3,37 @@
   become: true
 
   vars:
-    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    kubeconfig_path: /home/david/.kube/config
 
   tasks:
+    - name: Asegurar directorio .kube para david
+      file:
+        path: /home/david/.kube
+        state: directory
+        owner: david
+        group: david
+        mode: '0700'
+
+    - name: Copiar kubeconfig de k3s para david
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /home/david/.kube/config
+        remote_src: true
+        owner: david
+        group: david
+        mode: '0600'
+
     - name: Crear namespace WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
-        wait: true
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
             name: "{{ wp_namespace }}"
 
-    - name: Crear/actualizar Secret con credenciales DB
+    - name: Crear o actualizar Secret con credenciales DB
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -34,7 +50,7 @@
             WORDPRESS_DB_PASSWORD: "{{ wp_db_pass }}"
             WORDPRESS_DB_HOST: "{{ wp_db_host }}"
 
-    - name: Crear/actualizar Deployment WordPress
+    - name: Crear o actualizar Deployment WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -65,7 +81,7 @@
                       - secretRef:
                           name: wp-db-secret
 
-    - name: Crear/actualizar Service wordpress-svc
+    - name: Crear o actualizar Service wordpress-svc
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -79,10 +95,11 @@
             selector:
               app: wordpress
             ports:
-              - port: 80
+              - protocol: TCP
+                port: 80
                 targetPort: 80
 
-    - name: Crear/actualizar Ingress WordPress
+    - name: Crear o actualizar Ingress WordPress
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -105,7 +122,7 @@
                           port:
                             number: 80
 
-    - name: Esperar a que WordPress esté disponible
+    - name: Esperar a que el deployment de WordPress esté disponible
       kubernetes.core.k8s_info:
         kubeconfig: "{{ kubeconfig_path }}"
         api_version: apps/v1
