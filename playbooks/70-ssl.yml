@@ -1,0 +1,77 @@
+- name: Paso 12 - Configurar SSL autofirmado para WordPress
+  hosts: master
+  become: true
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars:
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    cert_path: /tmp/wordpress.crt
+    key_path: /tmp/wordpress.key
+
+  tasks:
+    - name: Instalar openssl
+      apt:
+        name: openssl
+        state: present
+        update_cache: true
+
+    - name: Generar clave privada
+      command: openssl genrsa -out {{ key_path }} 2048
+      args:
+        creates: "{{ key_path }}"
+
+    - name: Generar certificado autofirmado
+      command: >
+        openssl req -x509 -new -nodes
+        -key {{ key_path }}
+        -sha256 -days 365
+        -out {{ cert_path }}
+        -subj "/CN={{ wp_host }}"
+      args:
+        creates: "{{ cert_path }}"
+
+    - name: Crear Secret TLS en Kubernetes
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: wordpress-tls
+            namespace: "{{ wp_namespace }}"
+          type: kubernetes.io/tls
+          data:
+            tls.crt: "{{ lookup('file', cert_path) | b64encode }}"
+            tls.key: "{{ lookup('file', key_path) | b64encode }}"
+
+    - name: Crear/actualizar Ingress con HTTPS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: "{{ wp_ingress_name }}"
+            namespace: "{{ wp_namespace }}"
+            annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          spec:
+            tls:
+              - hosts:
+                  - "{{ wp_host }}"
+                secretName: wordpress-tls
+            rules:
+              - host: "{{ wp_host }}"
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: wordpress-svc
+                          port:
+                            number: 80
