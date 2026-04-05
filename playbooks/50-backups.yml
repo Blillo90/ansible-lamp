@@ -20,6 +20,14 @@
         shell: /bin/bash
         create_home: true
 
+    - name: Crear directorio .ssh de backup
+      file:
+        path: "/home/{{ backup_user }}/.ssh"
+        state: directory
+        owner: "{{ backup_user }}"
+        group: "{{ backup_user }}"
+        mode: '0700'
+
     - name: Crear directorio del repositorio Restic
       file:
         path: "{{ restic_repo }}"
@@ -34,13 +42,39 @@
         restic init --repo "{{ restic_repo }}"
       args:
         creates: "{{ restic_repo }}/config"
-      become_user: "{{ backup_user }}"
+
+    - name: Asegurar propietario del repositorio Restic
+      file:
+        path: "{{ restic_repo }}"
+        state: directory
+        owner: "{{ backup_user }}"
+        group: "{{ backup_user }}"
+        recurse: true
 
 - name: Configurar backup del master
   hosts: master
   become: true
 
   tasks:
+    - name: Generar clave SSH para root en master si no existe
+      openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        type: ed25519
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Leer clave pública del master
+      slurp:
+        src: /root/.ssh/id_ed25519.pub
+      register: master_pubkey
+
+    - name: Autorizar clave pública del master en backup
+      authorized_key:
+        user: "{{ backup_user }}"
+        key: "{{ master_pubkey.content | b64decode }}"
+      delegate_to: lamp-backup
+
     - name: Crear archivo de variables Restic en master
       copy:
         dest: /etc/restic.env
@@ -56,6 +90,7 @@
         content: |
           #!/bin/bash
           source /etc/restic.env
+          export HOME=/root
           restic backup /home/david/ansible-lamp
           restic forget --keep-last 7 --prune
 
@@ -71,6 +106,25 @@
   become: true
 
   tasks:
+    - name: Generar clave SSH para root en db si no existe
+      openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        type: ed25519
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Leer clave pública de db
+      slurp:
+        src: /root/.ssh/id_ed25519.pub
+      register: db_pubkey
+
+    - name: Autorizar clave pública de db en backup
+      authorized_key:
+        user: "{{ backup_user }}"
+        key: "{{ db_pubkey.content | b64decode }}"
+      delegate_to: lamp-backup
+
     - name: Crear archivo de variables Restic en db
       copy:
         dest: /etc/restic.env
@@ -86,6 +140,7 @@
         content: |
           #!/bin/bash
           source /etc/restic.env
+          export HOME=/root
           mysqldump -u {{ wp_db_user }} -p{{ wp_db_pass }} {{ wp_db_name }} > /tmp/wordpress.sql
           restic backup /tmp/wordpress.sql
           rm -f /tmp/wordpress.sql
