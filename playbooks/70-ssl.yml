@@ -2,18 +2,43 @@
   hosts: master
   become: true
 
-  vars_files:
-    - ../group_vars/all.yml
-
   vars:
-    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    kubeconfig_path: /home/david/.kube/config
     cert_path: /tmp/wordpress.crt
     key_path: /tmp/wordpress.key
+    tls_secret_name: wordpress-tls
 
   tasks:
     - name: Instalar openssl
       apt:
         name: openssl
+        state: present
+        update_cache: true
+
+    - name: Asegurar directorio .kube para david
+      file:
+        path: /home/david/.kube
+        state: directory
+        owner: david
+        group: david
+        mode: '0700'
+
+    - name: Copiar kubeconfig de k3s para david
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /home/david/.kube/config
+        remote_src: true
+        owner: david
+        group: david
+        mode: '0600'
+
+    - name: Instalar dependencias Python para Kubernetes
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-yaml
+          - python3-kubernetes
         state: present
         update_cache: true
 
@@ -28,9 +53,19 @@
         -key {{ key_path }}
         -sha256 -days 365
         -out {{ cert_path }}
-        -subj "/CN={{ wp_host }}"
+        -subj /CN={{ wp_host }}
       args:
         creates: "{{ cert_path }}"
+
+    - name: Leer certificado generado
+      slurp:
+        src: "{{ cert_path }}"
+      register: cert_file
+
+    - name: Leer clave privada generada
+      slurp:
+        src: "{{ key_path }}"
+      register: key_file
 
     - name: Crear Secret TLS en Kubernetes
       kubernetes.core.k8s:
@@ -40,14 +75,14 @@
           apiVersion: v1
           kind: Secret
           metadata:
-            name: wordpress-tls
+            name: "{{ tls_secret_name }}"
             namespace: "{{ wp_namespace }}"
           type: kubernetes.io/tls
           data:
-            tls.crt: "{{ lookup('file', cert_path) | b64encode }}"
-            tls.key: "{{ lookup('file', key_path) | b64encode }}"
+            tls.crt: "{{ cert_file.content }}"
+            tls.key: "{{ key_file.content }}"
 
-    - name: Crear/actualizar Ingress con HTTPS
+    - name: Crear o actualizar Ingress con HTTPS
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -58,12 +93,11 @@
             name: "{{ wp_ingress_name }}"
             namespace: "{{ wp_namespace }}"
             annotations:
-              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+              traefik.ingress.kubernetes.io/router.tls: "true"
           spec:
             tls:
-              - hosts:
-                  - "{{ wp_host }}"
-                secretName: wordpress-tls
+              - secretName: "{{ tls_secret_name }}"
             rules:
               - host: "{{ wp_host }}"
                 http:
