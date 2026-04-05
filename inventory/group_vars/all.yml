@@ -11,3 +11,10 @@ wp_image: "wordpress:php8.2-apache"
 # Ingress
 wp_ingress_name: wordpress-ingress
 wp_host: "wordpress.local"   
+
+# Restic
+
+backup_server_ip: 192.168.56.103
+backup_user: backup
+restic_repo: /srv/restic/wp
+restic_password: "restic123"
